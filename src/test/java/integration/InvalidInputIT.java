@@ -9,25 +9,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class InvalidInputIT extends BaseIT {
 
     @Test
-    void putMissingId_returns400() {
-        var res = ClientDrivers.putWeather(server.baseUrl(), TestData.missingId(), 0);
-        assertEquals(400, res.statusCode());
+    void postReturns400() throws Exception {
+        ClientDrivers.Response r = client.postToWeather();
+        assertEquals(400, r.code, "POST should yield 400 (per assignment simplification)");
     }
 
     @Test
-    void putMalformed_returns400() {
-        var res = ClientDrivers.putWeather(server.baseUrl(), TestData.malformed(), 0);
-        assertEquals(400, res.statusCode());
+    void emptyPutReturns204() throws Exception {
+        ClientDrivers.Response r = client.putRaw(TestData.emptyBody(), "application/json");
+        assertEquals(204, r.code, "Empty body PUT should return 204");
     }
 
     @Test
-    void wrongPath_returns404() {
-        var res = ClientDrivers.getById(server.baseUrl(), "does-not-exist", 0);
-        // If your server returns 204 for missing id, change to 204 here.
-        // Many implementations use 204 (no content) for "not present".
-        // We'll accept 204 or 404 to be safe:
-        int sc = res.statusCode();
-        boolean ok = (sc == 204) || (sc == 404);
-        assertEquals(true, ok, "Expected 204 or 404, got " + sc);
+    void malformedJsonReturns500() throws Exception {
+        ClientDrivers.Response r = client.putRaw(TestData.malformedJson(), "application/json");
+        assertEquals(500, r.code, "Malformed JSON should return 500");
     }
 }

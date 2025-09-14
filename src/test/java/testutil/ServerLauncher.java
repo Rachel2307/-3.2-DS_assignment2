@@ -1,117 +1,85 @@
 package testutil;
 
-import api.Routes;
-import com.sun.net.httpserver.HttpServer;
-import core.AggregationService;
-import core.LamportClock;
-import store.StateStore;
-
+import java.io.BufferedReader;
 import java.io.IOException;
-import java.lang.reflect.Method;
-import java.net.InetSocketAddress;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.concurrent.Executors;
+import java.io.InputStreamReader;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
-/**
- * Starts your app in-process on a random free port, short TTL (2s).
- * Detects any of these overloads:
- *  - Routes.start(HttpServer, AggregationService, LamportClock, int)
- *  - Routes.start(HttpServer, AggregationService, LamportClock)
- *  - Routes.start(int, AggregationService, LamportClock)
- */
+import static testutil.Await.untilTrue;
+
 public final class ServerLauncher {
-    private HttpServer server;
-    private String baseUrl;
-    private final Path tmpDir;
+    private final int port;
+    private final List<String> jvmProps = new ArrayList<>();
+    private Process proc; // non-null only if we launched it
 
-    public ServerLauncher() {
-        try {
-            this.tmpDir = Files.createTempDirectory("asm2-tests");
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+    public ServerLauncher(int port) { this.port = port; }
+
+    public ServerLauncher withJvmProp(String k, String v) {
+        jvmProps.add("-D" + k + "=" + v);
+        return this;
     }
 
-    public void start() {
-        try {
-            // backing store (file path under temp dir)
-            Path storeFile = tmpDir.resolve("state.json");
-            StateStore store = new StateStore(storeFile);
+    public void start() throws Exception {
+        // If something is already listening, just use it.
+        if (responds(port)) return;
 
-            // LamportClock is now required by AggregationService
-            LamportClock lc = new LamportClock("it-tests");
+        String cp = System.getProperty("java.class.path");
+        List<String> cmd = new ArrayList<>();
+        cmd.add(System.getProperty("java.home") + "/bin/java");
+        cmd.addAll(jvmProps);
+        cmd.add("-cp");
+        cmd.add(cp);
+        // ✅ Correct main class:
+        cmd.add("app.AggregationServer");
+        // ✅ Pass the port arg (your server reads it):
+        cmd.add(Integer.toString(port));
 
-            // NOTE: Your AggregationService constructor now takes (StateStore, LamportClock)
-            AggregationService svc = new AggregationService(store, lc);
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.redirectErrorStream(true);
+        proc = pb.start();
 
-            // bind on random port
-            server = HttpServer.create(new InetSocketAddress(0), 0);
-            server.setExecutor(Executors.newCachedThreadPool());
-            int port = server.getAddress().getPort();
-
-            // reflect Routes.start(...)
-            boolean started = false;
-            for (Method m : Routes.class.getDeclaredMethods()) {
-                if (!m.getName().equals("start")) continue;
-                Class<?>[] p = m.getParameterTypes();
-                try {
-                    if (p.length == 4 &&
-                            p[0] == HttpServer.class &&
-                            p[1] == AggregationService.class &&
-                            p[2] == LamportClock.class &&
-                            p[3] == int.class) {
-                        m.invoke(null, server, svc, lc, 2);
-                        started = true;
-                        break;
+        // Stream output only when -Dtests.verbose=true
+        new Thread(() -> {
+            try (var br = new BufferedReader(new InputStreamReader(proc.getInputStream()))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    if (Boolean.getBoolean("tests.verbose")) {
+                        System.out.println("[server] " + line);
                     }
-                    if (p.length == 3 &&
-                            p[0] == HttpServer.class &&
-                            p[1] == AggregationService.class &&
-                            p[2] == LamportClock.class) {
-                        m.invoke(null, server, svc, lc);
-                        started = true;
-                        break;
-                    }
-                    if (p.length == 3 &&
-                            p[0] == int.class &&
-                            p[1] == AggregationService.class &&
-                            p[2] == LamportClock.class) {
-                        m.invoke(null, port, svc, lc);
-                        started = true;
-                        break;
-                    }
-                } catch (Exception ignore) {
-                    // try next overload
                 }
-            }
-            if (!started) {
-                throw new IllegalStateException("""
-                    Could not locate a compatible Routes.start(...) method.
-                    Expected one of:
-                     - start(HttpServer, AggregationService, LamportClock, int)
-                     - start(HttpServer, AggregationService, LamportClock)
-                     - start(int, AggregationService, LamportClock)
-                    """);
-            }
+            } catch (IOException ignored) {}
+        }, "server-stdout").start();
 
-            server.start();
-            this.baseUrl = "http://localhost:" + port;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        // Wait for /weather.json to respond (200–599 or 204 is fine)
+        untilTrue(() -> responds(port), Duration.ofSeconds(10), Duration.ofMillis(150));
     }
 
     public void stop() {
-        if (server != null) server.stop(0);
+        if (proc != null) {
+            proc.destroy();
+            try { proc.waitFor(); } catch (InterruptedException ignored) {}
+            proc = null;
+        }
     }
 
-    public void restart() {
-        stop();
-        start();
-    }
-
-    public String baseUrl() {
-        return baseUrl;
+    private static boolean responds(int port) {
+        try {
+            HttpClient c = HttpClient.newHttpClient();
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create("http://127.0.0.1:" + port + "/weather.json"))
+                    .timeout(Duration.ofMillis(600))
+                    .GET()
+                    .build();
+            HttpResponse<String> r = c.send(req, HttpResponse.BodyHandlers.ofString());
+            return r.statusCode() >= 200 && r.statusCode() < 600 || r.statusCode() == 204;
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

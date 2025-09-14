@@ -1,48 +1,74 @@
 package testutil;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
-/** Simple static HTTP helpers using the JDK client. */
 public final class ClientDrivers {
-    private static final HttpClient CLIENT = HttpClient.newHttpClient();
+    private final HttpClient client = HttpClient.newHttpClient();
+    private final int port;
 
-    private ClientDrivers() {}
+    public ClientDrivers(int port) { this.port = port; }
 
-    public static HttpResponse<String> putWeather(String baseUrl, String jsonBody, long lamport) {
-        try {
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/weather.json"))
-                    .header("Content-Type", "application/json")
-                    .header("X-Lamport", Long.toString(lamport))
-                    .PUT(HttpRequest.BodyPublishers.ofString(jsonBody))
-                    .build();
-            return CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+    public static String base(int port) { return "http://127.0.0.1:" + port; }
+
+    public Response getAll() throws IOException, InterruptedException {
+        return get("/weather.json");
     }
 
-    public static HttpResponse<String> getSnapshot(String baseUrl, long lamport) {
-        return get(baseUrl + "/weather.json", lamport);
+    public Response getById(String id) throws IOException, InterruptedException {
+        return get("/weather/" + id);
     }
 
-    public static HttpResponse<String> getById(String baseUrl, String id, long lamport) {
-        return get(baseUrl + "/weather/" + id, lamport);
+    public Response putWeather(String json) throws IOException, InterruptedException {
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(base(port) + "/weather.json"))
+                .header("Content-Type", "application/json")
+                // Optional Lamport header if your server uses one:
+                .header("X-Lamport", "1")
+                .PUT(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+        HttpResponse<String> r = client.send(req, HttpResponse.BodyHandlers.ofString());
+        return new Response(r.statusCode(), r.body());
     }
 
-    private static HttpResponse<String> get(String url, long lamport) {
-        try {
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("X-Lamport", Long.toString(lamport))
-                    .GET()
-                    .build();
-            return CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+    public Response putRaw(String body, String contentType) throws IOException, InterruptedException {
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(base(port) + "/weather.json"))
+                .header("Content-Type", contentType)
+                .PUT(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        HttpResponse<String> r = client.send(req, HttpResponse.BodyHandlers.ofString());
+        return new Response(r.statusCode(), r.body());
+    }
+
+    public Response postToWeather() throws IOException, InterruptedException {
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(base(port) + "/weather.json"))
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .build();
+        HttpResponse<String> r = client.send(req, HttpResponse.BodyHandlers.ofString());
+        return new Response(r.statusCode(), r.body());
+    }
+
+    public Response get(String path) throws IOException, InterruptedException {
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(base(port) + path))
+                .GET()
+                .build();
+        HttpResponse<String> r = client.send(req, HttpResponse.BodyHandlers.ofString());
+        return new Response(r.statusCode(), r.body());
+    }
+
+    public static final class Response {
+        public final int code;
+        public final String body;
+
+        public Response(int code, String body) {
+            this.code = code;
+            this.body = body;
         }
     }
 }

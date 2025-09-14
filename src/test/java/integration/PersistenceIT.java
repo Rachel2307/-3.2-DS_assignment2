@@ -2,27 +2,33 @@ package integration;
 
 import org.junit.jupiter.api.Test;
 import testutil.ClientDrivers;
+import testutil.JsonAsserts;
+import testutil.ServerLauncher;
 import testutil.TestData;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class PersistenceIT extends BaseIT {
 
     @Test
-    void dataSurvivesServerRestart() {
-        var put = ClientDrivers.putWeather(server.baseUrl(), TestData.validFlat("IDS60901"), 0);
-        assertTrue(put.statusCode() == 201 || put.statusCode() == 200);
+    void survivesRestart_stateJsonRestored() throws Exception {
+        // Put a record
+        var put = client.putWeather(TestData.adelaideJson());
+        // accept 200 or 201
+        assertEquals(true, put.code == 200 || put.code == 201);
 
-        // restart (new port, new process, but same store file is NOT reused in this simple launcher)
-        // So we just assert the API is still reachable (204 fresh).
-        // If your server persists to disk and reloads, replace with assertEquals(200,...)
-        server.restart();
+        // Stop server (simulate crash)
+        server.stop();
 
-        var after = ClientDrivers.getSnapshot(server.baseUrl(), 0);
-        // If your implementation truly persists across restarts in tests, expect 200:
-        // assertEquals(200, after.statusCode(), "after restart, data should persist");
-        // Otherwise keep 204:
-        assertEquals(204, after.statusCode(), "after restart with fresh launcher store, snapshot is empty");
+        // Restart on same port so it reuses same state dir
+        server = new ServerLauncher(port)
+                .withJvmProp("asm.port", Integer.toString(port));
+        server.start();
+        client = new ClientDrivers(port);
+
+        // Verify data is still there
+        var get = client.getAll();
+        assertEquals(200, get.code);
+        JsonAsserts.bodyContainsId(get.body, "IDS60901");
     }
 }

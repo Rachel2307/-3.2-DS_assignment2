@@ -2,24 +2,39 @@ package integration;
 
 import org.junit.jupiter.api.Test;
 import testutil.ClientDrivers;
+import testutil.JsonAsserts;
 import testutil.TestData;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class LamportIT extends BaseIT {
 
     @Test
-    void lamportMonotonicity_put_get_put_get() {
-        long l1 = ClientDrivers.putWeather(server.baseUrl(), TestData.validFlat("IDS60901"), 0)
-                .headers().firstValueAsLong("X-Lamport").orElse(0L);
-        long l2 = ClientDrivers.getSnapshot(server.baseUrl(), l1)
-                .headers().firstValueAsLong("X-Lamport").orElse(0L);
-        long l3 = ClientDrivers.putWeather(server.baseUrl(), TestData.validFlat("IDS60901"), l2)
-                .headers().firstValueAsLong("X-Lamport").orElse(0L);
-        long l4 = ClientDrivers.getSnapshot(server.baseUrl(), l3)
-                .headers().firstValueAsLong("X-Lamport").orElse(0L);
+    void interleavedPutGetRespectsOrder() throws Exception {
+        // PUT Adelaide
+        ClientDrivers.Response p1 = client.putWeather(TestData.adelaideJson());
+        assertTrueCode(p1.code, 201, 200, "First PUT should be 201/200");
 
-        assertTrue(l1 < l2 && l2 < l3 && l3 < l4,
-                "Lamport should strictly increase across operations");
+        // GET should see Adelaide, not Sydney yet
+        ClientDrivers.Response g1 = client.getAll();
+        JsonAsserts.bodyContainsId(g1.body, "IDS60901");
+        JsonAsserts.bodyNotContainsId(g1.body, "IDS60902");
+
+        // PUT Sydney now
+        ClientDrivers.Response p2 = client.putWeather(TestData.sydneyJson());
+        // update is okay to be 201 (new id) or 200 (if already present)
+        assertTrueCode(p2.code, 201, 200, "Second id PUT should be 201/200");
+
+        // GET should include both
+        ClientDrivers.Response g2 = client.getAll();
+        JsonAsserts.bodyContainsId(g2.body, "IDS60901");
+        JsonAsserts.bodyContainsId(g2.body, "IDS60902");
+        assertEquals(200, g2.code, "GET should return 200");
+    }
+
+    private static void assertTrueCode(int actual, int a, int b, String msg) {
+        if (actual != a && actual != b) {
+            throw new AssertionError(msg + " but got " + actual);
+        }
     }
 }

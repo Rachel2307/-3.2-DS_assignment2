@@ -2,27 +2,33 @@ package integration;
 
 import org.junit.jupiter.api.Test;
 import testutil.ClientDrivers;
+import testutil.JsonAsserts;
 import testutil.TestData;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class PutGetIT extends BaseIT {
 
     @Test
-    void putThenGetReturns200AndBody() {
-        var put = ClientDrivers.putWeather(server.baseUrl(), TestData.validFlat("IDS60901"), 0);
-        assertTrue(put.statusCode() == 201 || put.statusCode() == 200,
-                "PUT should be 201 or 200, was " + put.statusCode());
+    void firstPutReturns201_thenUpdateReturns200_andGetContains() throws Exception {
+        ClientDrivers.Response p1 = client.putWeather(TestData.adelaideJson());
+        // First time content for a source should be 201 per spec
+        // If your server returns 200 for first time, relax to accept 200/201:
+        assertTrueCode(p1.code, 201, 200, "Expected 201 on first PUT (or 200 if already exists)");
 
-        var get = ClientDrivers.getSnapshot(server.baseUrl(), 0);
-        assertEquals(200, get.statusCode(), "GET after PUT should be 200");
-        assertTrue(get.body().contains("IDS60901"));
+        ClientDrivers.Response g1 = client.getAll();
+        JsonAsserts.bodyContainsId(g1.body, "IDS60901");
+
+        ClientDrivers.Response p2 = client.putWeather(TestData.adelaideJson());
+        assertEquals(200, p2.code, "Expected 200 for subsequent PUT update");
+
+        ClientDrivers.Response g2 = client.getAll();
+        JsonAsserts.bodyContainsId(g2.body, "IDS60901");
     }
 
-    @Test
-    void secondPutIs200() {
-        ClientDrivers.putWeather(server.baseUrl(), TestData.validFlat("IDS60901"), 0);
-        var second = ClientDrivers.putWeather(server.baseUrl(), TestData.validFlat("IDS60901"), 0);
-        assertEquals(200, second.statusCode(), "Second PUT should be 200");
+    private static void assertTrueCode(int actual, int a, int b, String msg) {
+        if (actual != a && actual != b) {
+            throw new AssertionError(msg + " but got " + actual);
+        }
     }
 }
