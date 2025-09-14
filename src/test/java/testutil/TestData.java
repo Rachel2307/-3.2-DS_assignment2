@@ -1,8 +1,10 @@
 package testutil;
 
+// Sample JSON payloads used for integration tests
 public final class TestData {
-    private TestData() {}
+    private TestData() {} // prevent instantiation
 
+    // Adelaide weather JSON
     public static String adelaideJson() {
         return "{\n" +
                 "  \"id\":\"IDS60901\",\n" +
@@ -25,6 +27,7 @@ public final class TestData {
                 "}";
     }
 
+    // Sydney weather JSON
     public static String sydneyJson() {
         return "{\n" +
                 "  \"id\":\"IDS60902\",\n" +
@@ -47,7 +50,9 @@ public final class TestData {
                 "}";
     }
 
+    // malformed JSON string for testing error handling
     public static String malformedJson() { return "{ \"id\": \"BAD\", "; }
 
+    // empty body for testing PUT/POST handling
     public static String emptyBody() { return ""; }
 }

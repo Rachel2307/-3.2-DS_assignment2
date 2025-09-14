@@ -9,7 +9,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
 public final class GETClient {
-    // Set true to not send Lamport on GET (quiet/debug mode).
+    // If true → don’t send Lamport clock with GET (used for debugging).
     private static final boolean QUIET_GET = false;
 
     public static void main(String[] args) throws Exception {
@@ -22,24 +22,28 @@ public final class GETClient {
         LamportClock clock = new LamportClock("get-client");
         HttpClient client = HttpClient.newHttpClient();
 
+        // Build GET request to /weather.json
         HttpRequest.Builder rb = HttpRequest.newBuilder()
                 .uri(URI.create(base + "/weather.json"))
                 .GET();
 
+        // Tick Lamport once before sending (unless QUIET mode is on)
         if (!QUIET_GET) {
-            long L = clock.send(); // outbound tick once
+            long L = clock.send();
             rb.header(Config.LAMPORT_HEADER, String.valueOf(L));
         }
 
+        // Send GET request
         HttpResponse<String> resp = client.send(rb.build(), HttpResponse.BodyHandlers.ofString());
 
-        // Merge server Lamport exactly once
+        // Merge Lamport from server response
         long respLam = parseLamportHeader(resp);
         clock.receive(respLam);
 
         int status = resp.statusCode();
         String lam = String.valueOf(respLam);
 
+        // Print response info
         System.out.printf("Status: %d %s  X-Lamport=%s%n", status, statusText(status), lam);
         System.out.println("--- JSON ---");
         String body = (resp.body() == null) ? "" : resp.body().trim();
@@ -50,11 +54,13 @@ public final class GETClient {
         }
     }
 
+    // Read Lamport clock from response header
     private static long parseLamportHeader(HttpResponse<?> resp) {
         String v = resp.headers().firstValue(Config.LAMPORT_HEADER).orElse("0");
         try { return Long.parseLong(v.trim()); } catch (Exception e) { return 0L; }
     }
 
+    // Convert status codes into short text
     private static String statusText(int code) {
         return switch (code) {
             case 200 -> "OK";

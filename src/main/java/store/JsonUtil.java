@@ -5,16 +5,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 
-/**
- * Minimal JSON helper + key:value file parser.
- * - JSON writing supports Map/List/String/Number/Boolean/null
- * - JSON parsing supports a *flat* object with primitive values.
- *   (Sufficient for this assignment's payloads.)
- */
+// Minimal JSON helper + key:value file parser
+// Supports writing Map/List/String/Number/Boolean/null and parsing flat JSON objects
 public final class JsonUtil {
-    private JsonUtil() {}
+    private JsonUtil() {} // prevent instantiation
 
-    /** Parse "key:value" lines into a LinkedHashMap (preserves order). */
+    // Parse a file with "key:value" lines into a LinkedHashMap (preserves order)
     public static Map<String, String> parseKeyValueFile(Path file) throws IOException {
         Map<String, String> out = new LinkedHashMap<>();
         for (String line : Files.readAllLines(file)) {
@@ -27,14 +23,14 @@ public final class JsonUtil {
         return out;
     }
 
-    /** Serialize a Map (possibly nested) to JSON. */
+    // Serialize a Map (possibly nested) to JSON string
     public static String toJson(Map<String, ?> map) {
         StringBuilder sb = new StringBuilder();
         writeValue(sb, map);
         return sb.toString();
     }
 
-    /** Serialize a List to JSON. */
+    // Serialize a List to JSON string
     public static String toJsonList(List<?> list) {
         StringBuilder sb = new StringBuilder();
         writeValue(sb, list);
@@ -67,20 +63,17 @@ public final class JsonUtil {
             sb.append(']');
             return;
         }
-        // Fallback: toString as JSON string
+        // fallback: convert to JSON string
         sb.append('"').append(escape(String.valueOf(v))).append('"');
     }
 
     private static String escape(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+        // escape quotes, backslash, newline, carriage return, tab
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+                .replace("\r", "\\r").replace("\t", "\\t");
     }
 
-    /**
-     * Extremely small parser for a *flat* JSON object:
-     *   {"k":"v","n":1,"b":true}
-     * Values may be strings (quoted), numbers, booleans, or null.
-     * Whitespace allowed. No nested objects/arrays (not needed for payloads).
-     */
+    // Small parser for flat JSON objects (no nested arrays/objects)
     public static Map<String, Object> parseJsonObj(String json) {
         if (json == null) throw new IllegalArgumentException("null json");
         String s = json.trim();
@@ -130,8 +123,7 @@ public final class JsonUtil {
                     default -> out.append(e);
                 }
             } else if (c == '"') {
-                // i points just after closing quote
-                return new int[]{start, i - 1, i};
+                return new int[]{start, i - 1, i}; // return start, end, next index
             } else {
                 out.append(c);
             }
@@ -167,17 +159,17 @@ public final class JsonUtil {
             long asLong = Long.parseLong(num);
             return new ParseResult(asLong, j);
         } catch (NumberFormatException e) {
-            // Fallback: treat as string token
-            return new ParseResult(num, j);
+            return new ParseResult(num, j); // fallback: treat as string
         }
     }
 
-    /** Flatten a nested map/list into "path: value" lines (for pretty printing). */
+    // Flatten a nested map/list into "path: value" lines for pretty printing
     public static List<String> flatten(Map<String, Object> obj) {
         List<String> out = new ArrayList<>();
         walk("", obj, out);
         return out;
     }
+
     private static void walk(String prefix, Object v, List<String> out) {
         if (v instanceof Map<?,?> m) {
             for (var e : m.entrySet()) {

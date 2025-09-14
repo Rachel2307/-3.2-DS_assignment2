@@ -1,4 +1,3 @@
-// src/main/java/core/AggregationService.java
 package core;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,29 +13,25 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Consumer;
 
-/**
- * Aggregation service:
- * - Writer thread applies updates in order.
- * - NO Lamport ticking here (handlers already merged once per request).
- * - Expiry does not tick; it only logs with current now().
- */
+// Aggregation service: applies updates from content servers in order
+// Handles ingestion, snapshot, and pruning expired data
 public final class AggregationService {
-    private final StateStore store;
-    private final LamportClock clock;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final StateStore store;             // persistent store for all states
+    private final LamportClock clock;           // Lamport clock for ordering
+    private final ObjectMapper mapper = new ObjectMapper(); // JSON parser
 
-    // id -> SourceState
-    private final Map<String, SourceState> state = new ConcurrentHashMap<>();
-    private final BlockingQueue<Map<String, Object>> queue = new LinkedBlockingQueue<>();
-    private Thread writerThread;
+    private final Map<String, SourceState> state = new ConcurrentHashMap<>(); // id -> SourceState
+    private final BlockingQueue<Map<String, Object>> queue = new LinkedBlockingQueue<>(); // queue of incoming data
+    private Thread writerThread;                // background thread to apply updates
 
-    private Consumer<String> logger = System.out::println;
+    private Consumer<String> logger = System.out::println; // simple logger
 
+    // constructor: initialize store, clock, recover persisted state, start writer thread
     public AggregationService(StateStore store, LamportClock clock) {
         this.store = store;
         this.clock = clock;
 
-        // Recover persisted state (if available), but never fail startup
+        // try to load previous state, but ignore errors
         try {
             Map<String, SourceState> recovered = store.load();
             if (recovered != null) state.putAll(recovered);
@@ -44,16 +39,18 @@ public final class AggregationService {
             logger.accept("[startup] state load failed, starting empty: " + e.getMessage());
         }
 
+        // start writer thread to process queue
         writerThread = new Thread(this::writerLoop, "aggregation-writer");
         writerThread.setDaemon(true);
         writerThread.start();
     }
 
+    // allow setting a custom logger
     public void setLogger(Consumer<String> logger) {
         this.logger = (logger == null) ? (s -> {}) : logger;
     }
 
-    /** Enqueue JSON; writer thread will apply in order. Returns 201 (first) or 200 (update). */
+    // ingest JSON string, enqueue for writer thread, return 201 if first, 200 if update
     public int ingest(String json, LamportClock ignoredForLamport) throws IllegalArgumentException {
         try {
             @SuppressWarnings("unchecked")
@@ -61,7 +58,7 @@ public final class AggregationService {
             String id = (map.get("id") == null ? null : map.get("id").toString());
             if (id == null || id.isBlank()) throw new IllegalArgumentException("missing id");
 
-            // Tag metadata (informational only)
+            // add metadata for tracking
             map.put("_enqueuedAtMs", System.currentTimeMillis());
             map.put("_enqueuedLamport", clock.now());
 
@@ -72,6 +69,7 @@ public final class AggregationService {
         }
     }
 
+    // background loop to take from queue and apply updates
     private void writerLoop() {
         try {
             while (!Thread.currentThread().isInterrupted()) {
@@ -83,42 +81,44 @@ public final class AggregationService {
         }
     }
 
+    // apply a single map to state
     private synchronized void applyMap(Map<String, Object> map) {
         String id = String.valueOf(map.get("id"));
 
-        // Construct WeatherRecord with the original Object map + current Lamport
+        // create WeatherRecord with Lamport timestamp
         WeatherRecord rec = new WeatherRecord(map, clock.now());
         boolean first = !state.containsKey(id);
 
-        // Your SourceState takes only WeatherRecord
+        // update or insert SourceState
         state.put(id, new SourceState(rec));
 
         try { persist(); } catch (Exception ignore) {}
 
         int qSizeAfter = queue.size();
-        // DO NOT tick here; just log with current clock.now()
+        // just log the PUT event, do not tick Lamport here
         logger.accept(String.format("[PUT] id=%s L=%d q=%d", id, clock.now(), qSizeAfter));
     }
 
-    /** Snapshot of all sources as JSON array of objects. */
+    // snapshot of all sources as JSON array
     public String snapshotJson() throws IOException {
         List<Map<String, Object>> arr = new ArrayList<>();
         for (SourceState s : state.values()) arr.add(s.record().getFields());
         return mapper.writeValueAsString(arr);
     }
 
-    /** Snapshot for one id, or null. */
+    // snapshot for a single id, or null if missing
     public String singleJson(String id) throws IOException {
         SourceState s = state.get(id);
         if (s == null) return null;
         return mapper.writeValueAsString(s.record().getFields());
     }
 
-    /** Remove entries that haven't been seen within expirySec; logs removals (no ticking). */
+    // remove entries not seen within expirySec, log removals
     public synchronized void pruneExpired(int expirySec) {
         Instant cutoff = Instant.now().minusSeconds(expirySec);
         List<String> removed = new ArrayList<>();
 
+        // remove expired states
         state.entrySet().removeIf(e -> {
             SourceState ss = e.getValue();
             Instant seen = (ss.lastSeen() != null) ? ss.lastSeen() : Instant.EPOCH;
@@ -134,9 +134,11 @@ public final class AggregationService {
         try { persist(); } catch (Exception ignore) {}
     }
 
+    // check if no sources exist
     public boolean isEmpty() {
         return state.isEmpty();
     }
 
+    // save current state to store
     private void persist() throws IOException { store.save(state); }
 }

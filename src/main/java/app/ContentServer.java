@@ -13,10 +13,10 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Content Server (menu-driven):
- * - ticks ONCE per outbound PUT via LamportClock.send()
- * - merges inbound Lamport from server response via LamportClock.receive()
- * - parses input file locally (no JsonUtil.readKeyValueFile dependency)
+ * Content Server program.
+ * - Ticks the Lamport clock once whenever sending a PUT.
+ * - After server response, merges Lamport from header.
+ * - Reads input file directly and converts to JSON if needed.
  */
 public final class ContentServer {
     public static void main(String[] args) {
@@ -30,14 +30,18 @@ public final class ContentServer {
         LamportClock clock = new LamportClock("content");
         AtomicReference<Path> fileRef = new AtomicReference<>(filePath);
 
+        // Simple console menu for user interaction
         new ConsoleMenu("Content Server")
                 .option("Send PUT to Aggregation Server", () -> {
                     try {
+                        // Read file and convert to JSON
                         String json = readAsJson(fileRef.get());
-                        long L = clock.send(); // OUTBOUND tick exactly once
+
+                        // Send PUT (clock ticks once when sending)
+                        long L = clock.send();
                         var resp = HttpUtil.putJson(baseUrl + "/weather.json", json, L);
 
-                        // INBOUND merge once with server's Lamport
+                        // Merge Lamport from server response
                         clock.receive(HttpUtil.readLamport(resp));
 
                         System.out.printf("PUT status=%d, Lamport=%d%n",
@@ -47,6 +51,7 @@ public final class ContentServer {
                     }
                 })
                 .option("Change weather data file", () -> {
+                    // Allow switching to a different file path
                     Path newPath = ConsoleMenu.promptPath("New file path", fileRef.get());
                     fileRef.set(newPath);
                     System.out.println("File set to: " + newPath);
@@ -55,17 +60,18 @@ public final class ContentServer {
                 .loop();
     }
 
-    /** Reads file; if it's JSON, return as-is; else parse key:value lines into JSON. */
+    // Read file content. If JSON already, return as-is.
+    // If it's key:value format, convert it into JSON.
     private static String readAsJson(Path p) throws IOException {
         String raw = Files.readString(p, StandardCharsets.UTF_8).trim();
-        if (raw.isEmpty()) return ""; // send empty body → server should respond 204
+        if (raw.isEmpty()) return ""; // empty body → server should respond with 204
         if (raw.startsWith("{")) return raw;
 
         Map<String, String> m = parseKeyValue(raw);
         return toJsonFlat(m);
     }
 
-    /** Parse simple "key:value" lines into a Map (ignores blank and comment lines). */
+    // Parse key:value lines into a map (ignore empty lines and comments).
     private static Map<String, String> parseKeyValue(String text) {
         Map<String, String> out = new LinkedHashMap<>();
         for (String line : text.split("\\R")) {
@@ -80,7 +86,7 @@ public final class ContentServer {
         return out;
     }
 
-    /** Minimal JSON builder for a flat string map (avoids extra deps). */
+    // Build a simple JSON string from a flat map.
     private static String toJsonFlat(Map<String, String> m) {
         if (m == null || m.isEmpty()) return "";
         StringBuilder sb = new StringBuilder("{");
@@ -96,6 +102,7 @@ public final class ContentServer {
         return sb.toString();
     }
 
+    // Escape quotes and backslashes for JSON.
     private static String escape(String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }

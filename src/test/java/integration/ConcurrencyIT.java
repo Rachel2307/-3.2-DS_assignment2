@@ -10,13 +10,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+// Integration test to check concurrent PUTs and eventual consistency
 public class ConcurrencyIT extends BaseIT {
 
     @Test
     void concurrentPuts_thenSequentialRepair_resultsInBothPresent() throws Exception {
-        AtomicInteger codesOk = new AtomicInteger(0);
-        CountDownLatch latch = new CountDownLatch(2);
+        AtomicInteger codesOk = new AtomicInteger(0); // count successful PUT responses
+        CountDownLatch latch = new CountDownLatch(2); // wait for both threads
 
+        // thread for Adelaide PUT
         Thread t1 = new Thread(() -> {
             try {
                 var r = client.putWeather(TestData.adelaideJson());
@@ -24,6 +26,8 @@ public class ConcurrencyIT extends BaseIT {
             } catch (Exception ignored) {}
             latch.countDown();
         });
+
+        // thread for Sydney PUT
         Thread t2 = new Thread(() -> {
             try {
                 var r = client.putWeather(TestData.sydneyJson());
@@ -33,22 +37,23 @@ public class ConcurrencyIT extends BaseIT {
         });
 
         t1.start(); t2.start();
-        latch.await();
+        latch.await(); // wait for both PUTs to complete
 
-        // Both requests should have been OK (no 5xx)
+        // Both requests should be OK (no 5xx)
         assertTrue(codesOk.get() == 2, "Both concurrent PUTs should return 200/201");
 
-        // After the race, at least one id should be visible (order-agnostic)
+        // After race, at least one id should be visible
         ClientDrivers.Response gAfterRace = client.getAll();
         JsonAsserts.bodyContainsAnyId(gAfterRace.body, "IDS60901", "IDS60902");
 
-        // If one is missing, PUT it sequentially and verify both present
+        // If one is missing, PUT sequentially to ensure both are present
         boolean hasAdl = gAfterRace.body != null && gAfterRace.body.contains("IDS60901");
         boolean hasSyd = gAfterRace.body != null && gAfterRace.body.contains("IDS60902");
 
         if (!hasAdl) client.putWeather(TestData.adelaideJson());
         if (!hasSyd) client.putWeather(TestData.sydneyJson());
 
+        // verify both IDs are finally present
         ClientDrivers.Response gFinal = client.getAll();
         JsonAsserts.bodyContainsId(gFinal.body, "IDS60901");
         JsonAsserts.bodyContainsId(gFinal.body, "IDS60902");

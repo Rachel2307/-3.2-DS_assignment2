@@ -13,38 +13,38 @@ import java.util.List;
 
 import static testutil.Await.untilTrue;
 
+// Helper to launch a server process for integration tests
 public final class ServerLauncher {
-    private final int port;
-    private final List<String> jvmProps = new ArrayList<>();
-    private Process proc; // non-null only if we launched it
+    private final int port; // server port to launch
+    private final List<String> jvmProps = new ArrayList<>(); // JVM system properties
+    private Process proc; // process handle if we started the server
 
     public ServerLauncher(int port) { this.port = port; }
 
+    // add JVM property (e.g., -Dkey=value)
     public ServerLauncher withJvmProp(String k, String v) {
         jvmProps.add("-D" + k + "=" + v);
         return this;
     }
 
+    // start server (or reuse if already listening)
     public void start() throws Exception {
-        // If something is already listening, just use it.
-        if (responds(port)) return;
+        if (responds(port)) return; // server already running
 
-        String cp = System.getProperty("java.class.path");
+        String cp = System.getProperty("java.class.path"); // classpath
         List<String> cmd = new ArrayList<>();
-        cmd.add(System.getProperty("java.home") + "/bin/java");
-        cmd.addAll(jvmProps);
+        cmd.add(System.getProperty("java.home") + "/bin/java"); // java binary
+        cmd.addAll(jvmProps); // optional JVM properties
         cmd.add("-cp");
         cmd.add(cp);
-        // ✅ Correct main class:
-        cmd.add("app.AggregationServer");
-        // ✅ Pass the port arg (your server reads it):
-        cmd.add(Integer.toString(port));
+        cmd.add("app.AggregationServer"); // main class
+        cmd.add(Integer.toString(port)); // pass port argument
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
-        pb.redirectErrorStream(true);
+        pb.redirectErrorStream(true); // merge stdout/stderr
         proc = pb.start();
 
-        // Stream output only when -Dtests.verbose=true
+        // log server output if tests.verbose=true
         new Thread(() -> {
             try (var br = new BufferedReader(new InputStreamReader(proc.getInputStream()))) {
                 String line;
@@ -56,10 +56,11 @@ public final class ServerLauncher {
             } catch (IOException ignored) {}
         }, "server-stdout").start();
 
-        // Wait for /weather.json to respond (200–599 or 204 is fine)
+        // wait until /weather.json responds
         untilTrue(() -> responds(port), Duration.ofSeconds(10), Duration.ofMillis(150));
     }
 
+    // stop server process if started
     public void stop() {
         if (proc != null) {
             proc.destroy();
@@ -68,6 +69,7 @@ public final class ServerLauncher {
         }
     }
 
+    // check if server responds at /weather.json
     private static boolean responds(int port) {
         try {
             HttpClient c = HttpClient.newHttpClient();

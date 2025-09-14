@@ -3,18 +3,17 @@ package util;
 import java.util.Timer;
 import java.util.TimerTask;
 
-/**
- * Minimal periodic scheduler used to trigger the 30s expiry check.
- * Runs as a daemon so it won't block JVM shutdown.
- */
+// Minimal scheduler to run periodic tasks (like expiry checks)
 public final class ExpiryScheduler {
-    private final Timer timer = new Timer("expiry", true);
+    private final Timer timer = new Timer("expiry", true); // daemon timer thread
 
+    // run the given task every periodMillis milliseconds
     public void everyMillis(long periodMillis, Runnable task) {
         timer.scheduleAtFixedRate(new TimerTask() {
-            @Override public void run() { task.run(); }
+            @Override public void run() { task.run(); } // call the task
         }, periodMillis, periodMillis);
     }
 
+    // stop the scheduler
     public void stop() { timer.cancel(); }
 }

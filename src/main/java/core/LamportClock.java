@@ -2,36 +2,27 @@ package core;
 
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Lamport logical clock with a minimal, safe surface:
- * - send(): increment once for an outbound message; returns value to send
- * - receive(m): merge for an inbound message; returns new local value
- * - now(): read current without ticking
- *
- * Backward-compat shims:
- * - tickSend() -> send()
- * - onReceive(m) -> receive(m)
- * - tickProcess() -> NO-OP (prevents accidental extra ticks)
- */
+// Lamport logical clock for ordering events across nodes
+// Provides send(), receive(), and read-only now()
 public final class LamportClock {
-    private final String id;
-    private final AtomicLong time = new AtomicLong(0);
+    private final String id;                   // unique ID for this clock
+    private final AtomicLong time = new AtomicLong(0); // current Lamport time
 
     public LamportClock(String id) {
-        this.id = id;
+        this.id = id; // set clock ID
     }
 
-    /** Current value without increment. */
+    // read current value without increment
     public long now() {
         return time.get();
     }
 
-    /** Outbound event: increments once and returns the value to send. */
+    // outbound event: increment and return value to send
     public long send() {
         return time.incrementAndGet();
     }
 
-    /** Inbound event: merge with remote and advance by +1. */
+    // inbound event: merge remote value, advance by +1
     public long receive(long remote) {
         if (remote < 0) remote = 0;
         while (true) {
@@ -41,26 +32,27 @@ public final class LamportClock {
         }
     }
 
-    /** For legacy call sites: treat as NO-OP to avoid double-ticking. */
+    // legacy method: no-op for tickProcess to avoid extra increment
     public long tickProcess() {
         return now();
     }
 
-    /** Legacy shim for previous API. */
+    // legacy shim for old tickSend() calls
     public long tickSend() {
         return send();
     }
 
-    /** Legacy shim for previous API. */
+    // legacy shim for old onReceive() calls
     public void onReceive(long remote) {
         receive(remote);
     }
 
-    /** Legacy name for read-only peek. */
+    // legacy name for read-only peek
     public long peek() {
         return now();
     }
 
+    // get clock ID
     public String id() {
         return id;
     }

@@ -9,34 +9,36 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+// Base class for integration tests, sets up server & client
 public abstract class BaseIT {
-    protected int port;
-    protected ServerLauncher server;
-    protected ClientDrivers client;
-    protected Path stateDir;
+    protected int port;               // port for server
+    protected ServerLauncher server;  // server instance
+    protected ClientDrivers client;   // HTTP client
+    protected Path stateDir;          // directory for persisted state
 
     @BeforeEach
     void boot() throws Exception {
-        // Use an ephemeral port & pass it to the server
+        // pick a free ephemeral port
         port = pickFreePort();
         stateDir = Path.of("state");
-        // Clean persisted state between tests
+        // clean state directory before each test
         if (Files.exists(stateDir)) {
             Files.walk(stateDir)
-                    .sorted((a,b)->b.compareTo(a))
+                    .sorted((a,b)->b.compareTo(a)) // delete files before directories
                     .forEach(p -> { try { Files.deleteIfExists(p); } catch (IOException ignored) {} });
         }
 
-        server = new ServerLauncher(port);
+        server = new ServerLauncher(port); // launch server
         server.start();
-        client = new ClientDrivers(port);
+        client = new ClientDrivers(port);  // create client
     }
 
     @AfterEach
     void shutdown() {
-        if (server != null) server.stop();
+        if (server != null) server.stop(); // stop server after test
     }
 
+    // pick a free ephemeral port for testing
     private static int pickFreePort() throws IOException {
         try (java.net.ServerSocket s = new java.net.ServerSocket(0)) {
             return s.getLocalPort();
